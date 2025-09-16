@@ -1,0 +1,28 @@
+name: Sync to GitLab
+
+on:
+  push:
+    #branches:
+      #- main # 或者 'master', 或者你想要同步的分支
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: Add GitLab remote and push
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          git remote add gitlab https://oauth2:${GITLAB_TOKEN}@gitlab.com/james_gosling/Py25thon.git
+          git push gitlab --all
+          git push gitlab --tags
