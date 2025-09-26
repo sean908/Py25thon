@@ -2,11 +2,13 @@ from turtle import Turtle
 
 STARTING_POSITIONS = [(0, 0), (-20, 0), (-40, 0)]
 MOVE_DISTANCE = 20
+SELF_COLLISION_DISTANCE = 10
 
 UP = 90
 DOWN = 270
 LEFT = 180
 RIGHT = 0
+
 
 class Snake:
     def __init__(self):
@@ -39,8 +41,28 @@ class Snake:
 
     def left(self):
         if self.head.heading() != RIGHT:
-            self.head.seth(180)
+            self.head.seth(LEFT)
 
     def right(self):
         if self.head.heading() != LEFT:
-            self.head.seth(0)
+            self.head.seth(RIGHT)
+
+    def hit_wall(self, boundary_limit: int) -> bool:
+        x_cor = self.head.xcor()
+        y_cor = self.head.ycor()
+        return (
+            x_cor > boundary_limit
+            or x_cor < -boundary_limit
+            or y_cor > boundary_limit
+            or y_cor < -boundary_limit
+        )
+
+    def collided_with_self(self) -> bool:
+        return any(
+            self.head.distance(segment) < SELF_COLLISION_DISTANCE
+            for segment in self.segments[1:]
+        )
+
+    def hide(self):
+        for segment in self.segments:
+            segment.hideturtle()
