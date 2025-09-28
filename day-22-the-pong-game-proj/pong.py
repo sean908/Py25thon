@@ -124,38 +124,50 @@ class Paddle:
 
 
 class Ball:
-    def __init__(self):
-        """Initialize the ball"""
+    def __init__(self, speed=1.5):
+        """Initialize the ball with configurable speed"""
         self.turtle = turtle.Turtle()
         self.turtle.speed(0)
         self.turtle.shape("square")
         self.turtle.color("white")
         self.turtle.penup()
         self.turtle.goto(0, 0)
-        
-        # Set initial random direction - fractional speeds for smoother movement
-        self.dx = random.choice([-1.5, 1.5])
-        self.dy = random.choice([-1.5, 1.5])
-        
+
+        # Set initial random direction with configurable speed
+        self.base_speed = speed
+        self.dx = random.choice([-self.base_speed, self.base_speed])
+        self.dy = random.choice([-self.base_speed, self.base_speed])
+
+    def set_speed(self, speed):
+        """Update ball speed while maintaining direction"""
+        # Calculate current direction (normalized)
+        current_dir_x = 1 if self.dx > 0 else -1
+        current_dir_y = 1 if self.dy > 0 else -1
+
+        # Apply new speed with same direction
+        self.base_speed = speed
+        self.dx = current_dir_x * self.base_speed
+        self.dy = current_dir_y * self.base_speed
+
     def move(self):
         """Move the ball"""
         new_x = self.turtle.xcor() + self.dx
         new_y = self.turtle.ycor() + self.dy
         self.turtle.goto(new_x, new_y)
-        
+
     def bounce_y(self):
         """Reverse vertical direction"""
         self.dy *= -1
-        
+
     def bounce_x(self):
         """Reverse horizontal direction"""
         self.dx *= -1
-        
+
     def reset_position(self):
         """Reset ball to center with random direction"""
         self.turtle.goto(0, 0)
-        self.dx = random.choice([-1.5, 1.5])
-        self.dy = random.choice([-1.5, 1.5])
+        self.dx = random.choice([-self.base_speed, self.base_speed])
+        self.dy = random.choice([-self.base_speed, self.base_speed])
 
 
 class PongGame:
@@ -167,12 +179,31 @@ class PongGame:
         self.PADDLE_HEIGHT = 100
         self.BALL_SIZE = 20
         self.WINNING_SCORE = 5
+
+        # Ball speed settings (configurable)
+        self.BALL_SPEED_SLOW = 1.0
+        self.BALL_SPEED_NORMAL = 1.5  # Default
+        self.BALL_SPEED_FAST = 2.0
+        self.BALL_SPEED_VERY_FAST = 2.5
+        self.current_ball_speed = self.BALL_SPEED_NORMAL
         
         # Game state
         self.game_mode = None  # "single", "two_player", or None (menu)
         self.player1_score = 0
         self.player2_score = 0
         self.game_running = False
+        self.frame_count = 0  # For periodic focus checks
+
+        # Key state tracking for continuous movement
+        self.keys_pressed = {
+            'w': False, 'W': False,
+            's': False, 'S': False,
+            'Up': False, 'Down': False
+        }
+
+        # Focus management tracking
+        self.last_focus_check = 0
+        self.focus_recovery_attempts = 0
         
         # Initialize screen FIRST (without keyboard bindings)
         self.setup_screen_basic()
@@ -181,7 +212,7 @@ class PongGame:
         self.paddle1 = Paddle(-350, 0, self.PADDLE_WIDTH, self.PADDLE_HEIGHT)
         self.paddle2 = Paddle(350, 0, self.PADDLE_WIDTH, self.PADDLE_HEIGHT)
         self.paddle2.set_ai_speed(7)  # Make AI paddle faster than player
-        self.ball = Ball()
+        self.ball = Ball(self.current_ball_speed)
         
         # Score display
         self.score_turtle = turtle.Turtle()
@@ -213,26 +244,148 @@ class PongGame:
         # Set coordinate system
         self.screen.setworldcoordinates(-self.SCREEN_WIDTH//2, -self.SCREEN_HEIGHT//2,
                                        self.SCREEN_WIDTH//2, self.SCREEN_HEIGHT//2)
-        
+
+    # Key press/release handlers for continuous movement
+    def key_pressed(self, key):
+        """Handle key press events"""
+        if key in self.keys_pressed:
+            self.keys_pressed[key] = True
+
+    def key_released(self, key):
+        """Handle key release events"""
+        if key in self.keys_pressed:
+            self.keys_pressed[key] = False
+
+    def handle_continuous_movement(self):
+        """Handle continuous paddle movement based on pressed keys"""
+        if hasattr(self, 'paddle1') and self.paddle1:
+            # Player 1 movement (W/S - both cases for CapsLock)
+            if self.keys_pressed['w'] or self.keys_pressed['W']:
+                self.paddle1.move_up()
+            if self.keys_pressed['s'] or self.keys_pressed['S']:
+                self.paddle1.move_down()
+
+        if hasattr(self, 'paddle2') and self.paddle2 and self.game_mode == "two_player":
+            # Player 2 movement (only in two player mode)
+            if self.keys_pressed['Up']:
+                self.paddle2.move_up()
+            if self.keys_pressed['Down']:
+                self.paddle2.move_down()
+
+    # Ball speed control methods
+    def set_ball_speed_slow(self):
+        """Set ball speed to slow"""
+        self.current_ball_speed = self.BALL_SPEED_SLOW
+        if hasattr(self, 'ball') and self.ball:
+            self.ball.set_speed(self.current_ball_speed)
+
+    def set_ball_speed_normal(self):
+        """Set ball speed to normal"""
+        self.current_ball_speed = self.BALL_SPEED_NORMAL
+        if hasattr(self, 'ball') and self.ball:
+            self.ball.set_speed(self.current_ball_speed)
+
+    def set_ball_speed_fast(self):
+        """Set ball speed to fast"""
+        self.current_ball_speed = self.BALL_SPEED_FAST
+        if hasattr(self, 'ball') and self.ball:
+            self.ball.set_speed(self.current_ball_speed)
+
+    def set_ball_speed_very_fast(self):
+        """Set ball speed to very fast"""
+        self.current_ball_speed = self.BALL_SPEED_VERY_FAST
+        if hasattr(self, 'ball') and self.ball:
+            self.ball.set_speed(self.current_ball_speed)
+
+    def emergency_focus_recovery(self):
+        """Emergency focus recovery when keyboard stops responding"""
+        try:
+            self.focus_recovery_attempts += 1
+            print(f"Attempting focus recovery #{self.focus_recovery_attempts}")
+
+            # Force window to front aggressively
+            canvas = self.screen.getcanvas()
+            root = canvas.winfo_toplevel()
+
+            # Multiple recovery strategies
+            root.deiconify()  # Ensure window is not minimized
+            root.lift()       # Bring to front
+            root.focus_force()  # Force focus to window
+            canvas.focus_force()  # Force focus to canvas
+
+            # Re-establish all keyboard bindings
+            self.setup_keyboard_bindings()
+
+            # Clear any stuck key states
+            for key in self.keys_pressed:
+                self.keys_pressed[key] = False
+
+            print("Focus recovery completed")
+            return True
+
+        except Exception as e:
+            print(f"Focus recovery failed: {e}")
+            return False
+
     def setup_keyboard_bindings(self):
-        """Setup keyboard controls"""
+        """Setup keyboard controls based on current game mode"""
         self.screen.listen()
-        # Menu controls
+
+        # Menu controls (always available) - CapsLock independent
         self.screen.onkey(self.start_single_player, "1")
         self.screen.onkey(self.start_two_player, "2")
         self.screen.onkey(self.quit_game, "q")
-        
-        # Paddle controls
-        # Player 1 (left paddle)
-        self.screen.onkey(self.paddle1.move_up, "w")
-        self.screen.onkey(self.paddle1.move_down, "s")
-        
-        # Player 2 (right paddle)
-        self.screen.onkey(self.paddle2.move_up, "Up")
-        self.screen.onkey(self.paddle2.move_down, "Down")
-        
-        # Menu return (available during game)
+        self.screen.onkey(self.quit_game, "Q")  # CapsLock support
         self.screen.onkey(self.return_to_menu, "m")
+        self.screen.onkey(self.return_to_menu, "M")  # CapsLock support
+
+        # Ball speed controls (during game) - avoid conflict with menu keys
+        self.screen.onkey(self.set_ball_speed_slow, "z")
+        self.screen.onkey(self.set_ball_speed_slow, "Z")
+        self.screen.onkey(self.set_ball_speed_normal, "x")
+        self.screen.onkey(self.set_ball_speed_normal, "X")
+        self.screen.onkey(self.set_ball_speed_fast, "c")
+        self.screen.onkey(self.set_ball_speed_fast, "C")
+        self.screen.onkey(self.set_ball_speed_very_fast, "v")
+        self.screen.onkey(self.set_ball_speed_very_fast, "V")
+
+        # Emergency focus recovery key (F key)
+        self.screen.onkey(self.emergency_focus_recovery, "f")
+        self.screen.onkey(self.emergency_focus_recovery, "F")
+
+        # Continuous movement with key press/release (CapsLock independent)
+        if hasattr(self, 'paddle1') and self.paddle1:
+            # Player 1 controls - both uppercase and lowercase for CapsLock
+            self.screen.onkeypress(lambda: self.key_pressed('w'), "w")
+            self.screen.onkeyrelease(lambda: self.key_released('w'), "w")
+            self.screen.onkeypress(lambda: self.key_pressed('W'), "W")
+            self.screen.onkeyrelease(lambda: self.key_released('W'), "W")
+
+            self.screen.onkeypress(lambda: self.key_pressed('s'), "s")
+            self.screen.onkeyrelease(lambda: self.key_released('s'), "s")
+            self.screen.onkeypress(lambda: self.key_pressed('S'), "S")
+            self.screen.onkeyrelease(lambda: self.key_released('S'), "S")
+
+        if hasattr(self, 'paddle2') and self.paddle2:
+            # Player 2 controls (only in two player mode)
+            if self.game_mode == "two_player":
+                self.screen.onkeypress(lambda: self.key_pressed('Up'), "Up")
+                self.screen.onkeyrelease(lambda: self.key_released('Up'), "Up")
+                self.screen.onkeypress(lambda: self.key_pressed('Down'), "Down")
+                self.screen.onkeyrelease(lambda: self.key_released('Down'), "Down")
+            elif self.game_mode == "single":
+                # Disable Player 2 controls in single player mode (AI controlled)
+                self.screen.onkeypress(None, "Up")
+                self.screen.onkeyrelease(None, "Up")
+                self.screen.onkeypress(None, "Down")
+                self.screen.onkeyrelease(None, "Down")
+
+        # Ensure window has keyboard focus for gameplay
+        try:
+            self.screen.getcanvas().focus_set()
+            self.screen.getcanvas().focus_force()
+        except:
+            pass  # If focus setting fails, continue anyway
         
     def show_menu(self):
         """Display the main menu"""
@@ -264,9 +417,11 @@ class PongGame:
         menu_turtle.goto(0, -80)
         menu_turtle.write("Controls:", align="center", font=("Arial", 14, "bold"))
         menu_turtle.goto(0, -110)
-        menu_turtle.write("Player 1 (Left): W/S keys", align="center", font=("Arial", 12, "normal"))
+        menu_turtle.write("Player 1 (Left): W/S keys (CapsLock independent)", align="center", font=("Arial", 12, "normal"))
         menu_turtle.goto(0, -130)
         menu_turtle.write("Player 2 (Right): Arrow Up/Down keys", align="center", font=("Arial", 12, "normal"))
+        menu_turtle.goto(0, -150)
+        menu_turtle.write("Hold keys for continuous movement", align="center", font=("Arial", 11, "italic"))
         
         # Game rules
         menu_turtle.goto(0, -170)
@@ -275,13 +430,21 @@ class PongGame:
         menu_turtle.write(f"First to {self.WINNING_SCORE} points wins!", align="center", font=("Arial", 12, "normal"))
         menu_turtle.goto(0, -220)
         menu_turtle.write("During game: Press M to return to menu", align="center", font=("Arial", 12, "normal"))
-        
+
+        # Ball speed controls
+        menu_turtle.goto(0, -245)
+        menu_turtle.write("Ball Speed: Z=Slow, X=Normal, C=Fast, V=Very Fast", align="center", font=("Arial", 11, "normal"))
+
+        # Focus recovery help
+        menu_turtle.goto(0, -265)
+        menu_turtle.write("If controls stop working: Press F to fix focus", align="center", font=("Arial", 10, "italic"))
+
         # Sound effects info
         if SOUND_AVAILABLE:
-            menu_turtle.goto(0, -250)
+            menu_turtle.goto(0, -290)
             menu_turtle.write("🔊 Sound effects enabled", align="center", font=("Arial", 10, "normal"))
         else:
-            menu_turtle.goto(0, -250)
+            menu_turtle.goto(0, -290)
             menu_turtle.write("🔇 Sound effects not available", align="center", font=("Arial", 10, "normal"))
         
         # Re-establish keyboard bindings after screen.clear() reset them
@@ -338,7 +501,7 @@ class PongGame:
         self.paddle1 = Paddle(-350, 0, self.PADDLE_WIDTH, self.PADDLE_HEIGHT)
         self.paddle2 = Paddle(350, 0, self.PADDLE_WIDTH, self.PADDLE_HEIGHT)
         self.paddle2.set_ai_speed(7)  # Make AI paddle faster than player
-        self.ball = Ball()
+        self.ball = Ball(self.current_ball_speed)
 
         # Recreate score display
         self.score_turtle = turtle.Turtle()
@@ -383,6 +546,41 @@ class PongGame:
             self.ball.move()
             self.check_ball_collision()
             self.ai_move_paddle()
+
+            # Handle continuous paddle movement
+            self.handle_continuous_movement()
+
+            # Aggressive focus management (every 0.5 seconds = 30 frames at 60 FPS)
+            self.frame_count += 1
+            if self.frame_count % 30 == 0:
+                try:
+                    # Multiple focus methods for better reliability
+                    canvas = self.screen.getcanvas()
+                    canvas.focus_set()
+                    canvas.focus_force()
+
+                    # Also try to bring window to front
+                    root = canvas.winfo_toplevel()
+                    root.lift()
+                    root.attributes('-topmost', True)
+                    root.attributes('-topmost', False)
+
+                    # Re-establish screen listening (in case it got disconnected)
+                    self.screen.listen()
+
+                except Exception as e:
+                    # If standard focus fails, try alternative methods
+                    try:
+                        self.screen.getcanvas().focus()
+                        self.screen.listen()
+                    except:
+                        pass  # If all focus methods fail, continue anyway
+
+            # Emergency focus recovery every 5 seconds (300 frames)
+            if self.frame_count % 300 == 0:
+                print(f"Performing emergency focus recovery at frame {self.frame_count}")
+                self.emergency_focus_recovery()
+
             self.screen.update()
             self.screen.ontimer(self.game_loop, 16)  # ~60 FPS for smoother movement
         
