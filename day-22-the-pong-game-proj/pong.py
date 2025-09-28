@@ -192,6 +192,7 @@ class PongGame:
         self.player1_score = 0
         self.player2_score = 0
         self.game_running = False
+        self.game_paused = False  # Pause state
         self.frame_count = 0  # For periodic focus checks
 
         # Key state tracking for continuous movement
@@ -204,6 +205,13 @@ class PongGame:
         # Focus management tracking
         self.last_focus_check = 0
         self.focus_recovery_attempts = 0
+
+        # Paddle movement tracking for dynamic ball physics
+        self.paddle1_last_y = 0
+        self.paddle2_last_y = 0
+
+        # Pause screen turtle (to manage clearing)
+        self.pause_turtle = None
         
         # Initialize screen FIRST (without keyboard bindings)
         self.setup_screen_basic()
@@ -327,6 +335,49 @@ class PongGame:
             print(f"Focus recovery failed: {e}")
             return False
 
+    def toggle_pause(self):
+        """Toggle game pause state"""
+        if self.game_running:
+            self.game_paused = not self.game_paused
+
+            if self.game_paused:
+                self.show_pause_screen()
+            else:
+                # Clear pause screen and restore game view
+                self.setup_game_view()
+
+    def show_pause_screen(self):
+        """Display pause screen overlay without affecting game objects"""
+        # Clear any existing pause turtle
+        if self.pause_turtle:
+            self.pause_turtle.clear()
+
+        # Create pause display turtle as overlay only
+        self.pause_turtle = turtle.Turtle()
+        self.pause_turtle.hideturtle()
+        self.pause_turtle.color("yellow")
+        self.pause_turtle.penup()
+        self.pause_turtle.speed(0)
+
+        # Display PAUSED text as overlay
+        self.pause_turtle.goto(0, 0)
+        self.pause_turtle.write("PAUSED", align="center", font=("Arial", 48, "bold"))
+
+        # Display instructions
+        self.pause_turtle.goto(0, -50)
+        self.pause_turtle.color("white")
+        self.pause_turtle.write("Press P to resume", align="center", font=("Arial", 16, "normal"))
+
+    def setup_game_view(self):
+        """Remove pause overlay without affecting game objects"""
+        # Only clear the pause screen overlay, keep all game objects intact
+        if self.pause_turtle:
+            self.pause_turtle.clear()
+            self.pause_turtle = None
+
+        # No need to recreate anything - all game objects remain exactly as they were
+        # This creates a smooth pause/resume experience with no visual flash
+
     def setup_keyboard_bindings(self):
         """Setup keyboard controls based on current game mode"""
         self.screen.listen()
@@ -352,6 +403,10 @@ class PongGame:
         # Emergency focus recovery key (F key)
         self.screen.onkey(self.emergency_focus_recovery, "f")
         self.screen.onkey(self.emergency_focus_recovery, "F")
+
+        # Pause/Unpause key (P key)
+        self.screen.onkey(self.toggle_pause, "p")
+        self.screen.onkey(self.toggle_pause, "P")
 
         # Continuous movement with key press/release (CapsLock independent)
         if hasattr(self, 'paddle1') and self.paddle1:
@@ -429,7 +484,7 @@ class PongGame:
         menu_turtle.goto(0, -200)
         menu_turtle.write(f"First to {self.WINNING_SCORE} points wins!", align="center", font=("Arial", 12, "normal"))
         menu_turtle.goto(0, -220)
-        menu_turtle.write("During game: Press M to return to menu", align="center", font=("Arial", 12, "normal"))
+        menu_turtle.write("During game: Press M to return to menu, P to pause", align="center", font=("Arial", 12, "normal"))
 
         # Ball speed controls
         menu_turtle.goto(0, -245)
@@ -542,7 +597,11 @@ class PongGame:
                 
     def game_loop(self):
         """Main game loop"""
-        if self.game_running:
+        if self.game_running and not self.game_paused:
+            # Update paddle movement tracking for dynamic ball physics
+            self.paddle1_last_y = self.paddle1.turtle.ycor()
+            self.paddle2_last_y = self.paddle2.turtle.ycor()
+
             self.ball.move()
             self.check_ball_collision()
             self.ai_move_paddle()
@@ -582,6 +641,9 @@ class PongGame:
                 self.emergency_focus_recovery()
 
             self.screen.update()
+
+        # Continue game loop regardless of pause state (for pause screen updates)
+        if self.game_running:
             self.screen.ontimer(self.game_loop, 16)  # ~60 FPS for smoother movement
         
     def quit_game(self):
@@ -600,30 +662,46 @@ class PongGame:
         self.score_turtle.write(score_text, align="center", font=("Arial", 16, "normal"))
         
     def check_ball_collision(self):
-        """Check ball collisions with walls and paddles"""
+        """Improved ball collision detection with dynamic physics"""
         ball_x = self.ball.turtle.xcor()
         ball_y = self.ball.turtle.ycor()
-        
+
         # Ball collision with top and bottom walls
         if ball_y > 290 or ball_y < -290:
             self.ball.bounce_y()
             SoundManager.play_wall_hit()  # Play wall hit sound
-            
-        # Ball collision with paddles
-        # Left paddle collision
-        if (ball_x < -330 and ball_x > -350 and 
-            ball_y < self.paddle1.turtle.ycor() + 50 and 
-            ball_y > self.paddle1.turtle.ycor() - 50):
-            self.ball.bounce_x()
-            SoundManager.play_paddle_hit()  # Play paddle hit sound
-            
-        # Right paddle collision  
-        if (ball_x > 330 and ball_x < 350 and
-            ball_y < self.paddle2.turtle.ycor() + 50 and 
-            ball_y > self.paddle2.turtle.ycor() - 50):
-            self.ball.bounce_x()
-            SoundManager.play_paddle_hit()  # Play paddle hit sound
-            
+
+        # Get paddle positions and dimensions
+        paddle1_x = self.paddle1.turtle.xcor()
+        paddle1_y = self.paddle1.turtle.ycor()
+        paddle2_x = self.paddle2.turtle.xcor()
+        paddle2_y = self.paddle2.turtle.ycor()
+
+        # Paddle dimensions (half-width and half-height for easier calculation)
+        paddle_half_width = 10  # PADDLE_WIDTH / 2
+        paddle_half_height = 50  # PADDLE_HEIGHT / 2
+        ball_radius = 10  # Half of ball size for collision detection
+
+        # Left paddle collision (Player 1)
+        if (self.ball.dx < 0 and  # Ball moving left toward paddle
+            ball_x - ball_radius <= paddle1_x + paddle_half_width and  # Ball reached paddle
+            ball_x - ball_radius > paddle1_x - paddle_half_width and   # Ball not past paddle
+            ball_y <= paddle1_y + paddle_half_height and               # Within paddle height
+            ball_y >= paddle1_y - paddle_half_height):                 # Within paddle height
+
+            # Calculate dynamic ball physics
+            self.handle_paddle_collision(1)  # 1 for left paddle
+
+        # Right paddle collision (Player 2)
+        elif (self.ball.dx > 0 and  # Ball moving right toward paddle
+              ball_x + ball_radius >= paddle2_x - paddle_half_width and  # Ball reached paddle
+              ball_x + ball_radius < paddle2_x + paddle_half_width and   # Ball not past paddle
+              ball_y <= paddle2_y + paddle_half_height and               # Within paddle height
+              ball_y >= paddle2_y - paddle_half_height):                 # Within paddle height
+
+            # Calculate dynamic ball physics
+            self.handle_paddle_collision(2)  # 2 for right paddle
+
         # Ball goes past left paddle - Player 2 scores
         if ball_x < -400:
             self.player2_score += 1
@@ -631,7 +709,7 @@ class PongGame:
             self.update_score_display()
             SoundManager.play_score()  # Play score sound
             self.check_win_condition()
-            
+
         # Ball goes past right paddle - Player 1 scores
         if ball_x > 400:
             self.player1_score += 1
@@ -639,6 +717,52 @@ class PongGame:
             self.update_score_display()
             SoundManager.play_score()  # Play score sound
             self.check_win_condition()
+
+    def handle_paddle_collision(self, paddle_num):
+        """Handle collision with enhanced physics based on paddle movement"""
+        ball_x = self.ball.turtle.xcor()
+        ball_y = self.ball.turtle.ycor()
+
+        if paddle_num == 1:  # Left paddle
+            paddle_y = self.paddle1.turtle.ycor()
+            paddle_velocity = self.paddle1.turtle.ycor() - self.paddle1_last_y
+            # Position ball outside paddle bounds to prevent sticking
+            self.ball.turtle.setx(-340)  # Just outside left paddle
+        else:  # Right paddle
+            paddle_y = self.paddle2.turtle.ycor()
+            paddle_velocity = self.paddle2.turtle.ycor() - self.paddle2_last_y
+            # Position ball outside paddle bounds to prevent sticking
+            self.ball.turtle.setx(340)   # Just outside right paddle
+
+        # Basic bounce
+        self.ball.bounce_x()
+
+        # Dynamic angle calculation based on where ball hits paddle
+        hit_position = (ball_y - paddle_y) / 50  # Normalize to -1 to 1
+        hit_position = max(-1, min(1, hit_position))  # Clamp to prevent extreme angles
+
+        # Add angle variation based on hit position
+        angle_factor = hit_position * 0.5  # Multiply by factor to control angle strength
+
+        # Apply paddle movement influence on ball speed and direction
+        speed_boost = abs(paddle_velocity) * 0.2  # Paddle movement affects ball speed
+        current_speed = abs(self.ball.dx)
+        new_speed = min(current_speed + speed_boost, self.current_ball_speed * 1.5)  # Cap max speed
+
+        # Update ball velocity with new speed and angle
+        direction = 1 if self.ball.dx > 0 else -1
+        self.ball.dx = direction * new_speed
+
+        # Add vertical component based on hit position and paddle movement
+        vertical_influence = angle_factor * new_speed + paddle_velocity * 0.3
+        self.ball.dy += vertical_influence
+
+        # Clamp vertical speed to prevent ball going too fast vertically
+        max_vertical_speed = self.current_ball_speed * 1.2
+        self.ball.dy = max(-max_vertical_speed, min(max_vertical_speed, self.ball.dy))
+
+        # Play sound
+        SoundManager.play_paddle_hit()
             
     def check_win_condition(self):
         """Check if someone won"""
